@@ -13,7 +13,7 @@ MONGODB_CONFIG = {
 MYSQL_WAREHOUSE_CONFIG = {
     'host': 'localhost',
     'user': 'root',
-    'password': 'UMRlfr1$',
+    'password': 'abeer123',
     'database': 'megamart_warehouse',
     'port': 3306
 }
