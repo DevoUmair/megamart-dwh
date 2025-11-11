@@ -98,10 +98,10 @@ class DataLoader:
         
         print("📈 Loading fact_sales table...")
         
-        # Define the columns for fact_sales
+        # Define the columns for fact_sales - using foreign KEYS, not IDs
         columns = [
-            'date_key', 'time_key', 'customer_id', 'product_id', 'store_id', 
-            'employee_id', 'promotion_id', 'supplier_id', 'transaction_id', 
+            'date_key', 'time_key', 'customer_key', 'product_key', 'store_key', 
+            'employee_key', 'promotion_key', 'supplier_key', 'transaction_id', 
             'line_item_id', 'quantity', 'unit_price', 'discount_amount', 
             'line_total', 'tax_amount', 'total_amount', 'profit', 
             'stock_level', 'restock_quantity', 'waste_quantity', 
@@ -121,7 +121,7 @@ class DataLoader:
         
         for fact in fact_data:
             try:
-                # Resolve foreign keys
+                # Resolve foreign keys - get the actual foreign key values from dimension tables
                 customer_key = self.get_foreign_key('dim_customer', 'customer_id', fact.get('customer_id'))
                 product_key = self.get_foreign_key('dim_product', 'product_id', fact.get('product_id'))
                 store_key = self.get_foreign_key('dim_store', 'store_id', fact.get('store_id'))
@@ -129,16 +129,16 @@ class DataLoader:
                 promotion_key = self.get_foreign_key('dim_promotion', 'promotion_id', fact.get('promotion_id'))
                 supplier_key = self.get_foreign_key('dim_supplier', 'supplier_id', fact.get('supplier_id'))
                 
-                # Prepare values in correct order
+                # Prepare values in correct order - using foreign KEYS, not IDs
                 values = (
                     fact.get('date_key'),
                     fact.get('time_key'),
-                    customer_key,
-                    product_key,
-                    store_key,
-                    employee_key,
-                    promotion_key,
-                    supplier_key,
+                    customer_key,  # This should be the foreign key (int), not customer_id (string)
+                    product_key,   # This should be the foreign key (int), not product_id (string)
+                    store_key,     # This should be the foreign key (int), not store_id (string)
+                    employee_key,  # This should be the foreign key (int), not employee_id (string)
+                    promotion_key, # This should be the foreign key (int), not promotion_id (string)
+                    supplier_key,  # This should be the foreign key (int), not supplier_id (string)
                     fact.get('transaction_id'),
                     fact.get('line_item_id'),
                     fact.get('quantity'),
@@ -161,8 +161,12 @@ class DataLoader:
                     fact.get('department')
                 )
                 
-                batch.append(values)
-                processed_count += 1
+                # Only add to batch if we have the required foreign keys
+                if all([fact.get('date_key'), product_key, store_key]):
+                    batch.append(values)
+                    processed_count += 1
+                else:
+                    continue
                 
                 # Insert in batches for performance
                 if len(batch) >= batch_size:
@@ -177,8 +181,12 @@ class DataLoader:
         
         # Insert remaining records
         if batch:
-            self.cursor.executemany(sql, batch)
-            self.conn.commit()
+            try:
+                self.cursor.executemany(sql, batch)
+                self.conn.commit()
+            except Error as e:
+                print(f"❌ Error inserting final batch: {e}")
+                self.conn.rollback()
         
         print(f"✅ fact_sales: {processed_count} records loaded")
     
@@ -189,10 +197,12 @@ class DataLoader:
         
         try:
             key_column = table_name.replace('dim_', '') + '_key'
-            self.cursor.execute(f"SELECT {key_column} FROM {table_name} WHERE {id_column} = %s", (value,))
+            query = f"SELECT {key_column} FROM {table_name} WHERE {id_column} = %s"
+            self.cursor.execute(query, (value,))
             result = self.cursor.fetchone()
             return result[0] if result else None
-        except Error:
+        except Error as e:
+            print(f"   ↳ Error getting foreign key for {table_name}.{id_column}={value}: {e}")
             return None
     
     def close(self):

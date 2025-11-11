@@ -239,13 +239,13 @@ class DataTransformer:
                 )
                 
                 fact_record = {
-                    # Foreign Keys
+                    # Foreign Keys - these are the IDs that will be resolved to keys in loader
                     'date_key': date_key,
                     'time_key': time_key,
-                    'customer_id': transaction.get('customer_id'),
-                    'product_id': item.get('product_id'),
-                    'store_id': transaction.get('store_id'),
-                    'employee_id': employee_info.get('employee_id'),
+                    'customer_id': transaction.get('customer_id'),  # This will be resolved to customer_key
+                    'product_id': item.get('product_id'),           # This will be resolved to product_key
+                    'store_id': transaction.get('store_id'),        # This will be resolved to store_key
+                    'employee_id': employee_info.get('employee_id'), # This will be resolved to employee_key
                     'promotion_id': None,  # Would need promotion mapping
                     'supplier_id': None,   # Would need product-supplier mapping
                     

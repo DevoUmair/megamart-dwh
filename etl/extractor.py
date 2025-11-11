@@ -3,6 +3,7 @@ import requests
 from pymongo import MongoClient
 from urllib.parse import quote_plus
 import os
+import time
 from config.settings import MONGODB_CONFIG, API_CONFIG, FILE_PATHS
 
 class DataExtractor:
@@ -12,7 +13,7 @@ class DataExtractor:
         self.setup_mongodb()
     
     def setup_mongodb(self):
-        """Setup MongoDB connections to OLTP databases"""
+        """Setup MongoDB connections to OLTP databases with proper timeout settings"""
         try:
             print("🔗 Connecting to MongoDB OLTP databases...")
             
@@ -21,8 +22,18 @@ class DataExtractor:
             encoded_password = quote_plus(password)
             cluster = MONGODB_CONFIG['cluster']
             
-            connection_string = f"mongodb+srv://{username}:{encoded_password}@{cluster}/?retryWrites=true&w=majority"
-            client = MongoClient(connection_string)
+            # Connection string with timeout settings (correct parameter names)
+            connection_string = f"mongodb+srv://{username}:{encoded_password}@{cluster}/?retryWrites=true&w=majority&socketTimeoutMS=30000&connectTimeoutMS=30000&serverSelectionTimeoutMS=30000"
+            
+            # Use only valid parameters
+            client = MongoClient(
+                connection_string,
+                maxPoolSize=50
+                # Removed socketKeepAlive as it's not a valid parameter
+            )
+            
+            # Test connection with timeout
+            client.admin.command('ping')
             
             # Connect to OLTP databases
             self.mongo_oltp1 = client[MONGODB_CONFIG['databases']['oltp1']]
@@ -32,46 +43,108 @@ class DataExtractor:
             print(f"   - {MONGODB_CONFIG['databases']['oltp1']}")
             print(f"   - {MONGODB_CONFIG['databases']['oltp2']}")
             
-            # Test connections
-            self.mongo_oltp1.list_collection_names()
-            self.mongo_oltp2.list_collection_names()
-            
         except Exception as e:
             print(f"❌ MongoDB connection failed: {e}")
             raise
     
+    def extract_mongodb_collection_batch(self, collection, collection_name, batch_size=1000, max_docs=50000):
+        """Extract data from MongoDB collection in batches to avoid timeouts"""
+        print(f"   ↳ Extracting {collection_name}...")
+        
+        try:
+            # Get total count first
+            total_count = collection.count_documents({})
+            print(f"     Total documents: {total_count:,}")
+            
+            # If collection is too large, limit the extraction
+            if total_count > max_docs:
+                print(f"     ⚠️  Collection too large, limiting to {max_docs:,} documents")
+                cursor = collection.find().limit(max_docs)
+            else:
+                cursor = collection.find()
+            
+            data = []
+            processed = 0
+            
+            for doc in cursor:
+                # Remove MongoDB _id field
+                if '_id' in doc:
+                    del doc['_id']
+                data.append(doc)
+                processed += 1
+                
+                # Progress indicator
+                if processed % batch_size == 0:
+                    print(f"       Processed {processed:,}/{min(total_count, max_docs):,} documents...")
+                
+                # Safety break for very large collections
+                if processed >= max_docs:
+                    break
+            
+            print(f"     ✅ Extracted {len(data):,} {collection_name}")
+            return data
+            
+        except Exception as e:
+            print(f"     ❌ Error extracting {collection_name}: {e}")
+            return []
+    
     def extract_mongodb_data(self):
-        """Extract data from MongoDB OLTP databases"""
+        """Extract data from MongoDB OLTP databases with batch processing"""
         print("📥 Extracting MongoDB OLTP data...")
         
         data = {}
         
         try:
-            # OLTP System 1 - Sales data from MongoDB
-            data['sales_transactions'] = list(self.mongo_oltp1.sales_transactions.find())
-            data['sales_items'] = list(self.mongo_oltp1.sales_items.find())
-            data['inventory_movements'] = list(self.mongo_oltp1.inventory_movements.find())
+            # OLTP System 1 - Sales data from MongoDB (with limits for large collections)
+            print("   OLTP System 1 - Sales Data:")
+            data['sales_transactions'] = self.extract_mongodb_collection_batch(
+                self.mongo_oltp1.sales_transactions, 
+                'sales_transactions',
+                max_docs=10000  # Limit transactions to 10K
+            )
             
-            # OLTP System 2 - Master data from MongoDB
-            data['customers'] = list(self.mongo_oltp2.customers.find())
-            data['products'] = list(self.mongo_oltp2.products.find())
-            data['store_locations'] = list(self.mongo_oltp2.store_locations.find())
-            data['suppliers'] = list(self.mongo_oltp2.suppliers.find())
+            data['sales_items'] = self.extract_mongodb_collection_batch(
+                self.mongo_oltp1.sales_items, 
+                'sales_items',
+                max_docs=15000  # Limit sales items to 30K
+            )
             
-            # Remove MongoDB _id fields
-            for key in data:
-                for item in data[key]:
-                    if '_id' in item:
-                        del item['_id']
+            data['inventory_movements'] = self.extract_mongodb_collection_batch(
+                self.mongo_oltp1.inventory_movements, 
+                'inventory_movements',
+                max_docs=5000  # Limit inventory movements to 5K
+            )
+            
+            # OLTP System 2 - Master data from MongoDB (smaller collections, no limits needed)
+            print("   OLTP System 2 - Master Data:")
+            data['customers'] = self.extract_mongodb_collection_batch(
+                self.mongo_oltp2.customers, 
+                'customers'
+            )
+            
+            data['products'] = self.extract_mongodb_collection_batch(
+                self.mongo_oltp2.products, 
+                'products'
+            )
+            
+            data['store_locations'] = self.extract_mongodb_collection_batch(
+                self.mongo_oltp2.store_locations, 
+                'store_locations'
+            )
+            
+            data['suppliers'] = self.extract_mongodb_collection_batch(
+                self.mongo_oltp2.suppliers, 
+                'suppliers'
+            )
             
             print(f"✅ MongoDB Extraction Summary:")
-            print(f"   - Sales Transactions: {len(data['sales_transactions'])}")
-            print(f"   - Sales Items: {len(data['sales_items'])}")
-            print(f"   - Inventory Movements: {len(data['inventory_movements'])}")
-            print(f"   - Customers: {len(data['customers'])}")
-            print(f"   - Products: {len(data['products'])}")
-            print(f"   - Stores: {len(data['store_locations'])}")
-            print(f"   - Suppliers: {len(data['suppliers'])}")
+            print(f"   - Sales Transactions: {len(data['sales_transactions']):,}")
+            print(f"   - Sales Items: {len(data['sales_items']):,}")
+            print(f"   - Inventory Movements: {len(data['inventory_movements']):,}")
+            print(f"   - Customers: {len(data['customers']):,}")
+            print(f"   - Products: {len(data['products']):,}")
+            print(f"   - Stores: {len(data['store_locations']):,}")
+            print(f"   - Suppliers: {len(data['suppliers']):,}")
             
         except Exception as e:
             print(f"❌ MongoDB extraction failed: {e}")
@@ -80,12 +153,14 @@ class DataExtractor:
         return data
     
     def extract_api_data(self):
-        """Extract data from Competitor Pricing API"""
+        """Extract data from Competitor Pricing API with error handling"""
         print("🌐 Extracting Competitor Pricing API data...")
         
         try:
             url = f"{API_CONFIG['base_url']}{API_CONFIG['endpoints']['competitor_pricing']}"
-            response = requests.get(f"{url}?limit=1000")
+            
+            # Add timeout to API request
+            response = requests.get(f"{url}?limit=1000", timeout=30)
             
             if response.status_code == 200:
                 api_response = response.json()
@@ -93,9 +168,12 @@ class DataExtractor:
                 print(f"✅ API: {len(data)} competitor pricing records")
                 return data
             else:
-                print(f"❌ API request failed: {response.status_code}")
+                print(f"❌ API request failed: {response.status_code} - {response.text}")
                 return []
                 
+        except requests.exceptions.Timeout:
+            print("❌ API request timed out")
+            return []
         except Exception as e:
             print(f"❌ API extraction failed: {e}")
             return []
@@ -134,14 +212,28 @@ class DataExtractor:
         return data
     
     def extract_all(self):
-        """Extract data from all sources"""
+        """Extract data from all sources with error handling"""
         print("\n" + "="*50)
         print("📥 EXTRACTION PHASE")
         print("="*50)
         
-        mongodb_data = self.extract_mongodb_data()
-        api_data = self.extract_api_data()
-        file_data = self.extract_flat_files()
+        try:
+            mongodb_data = self.extract_mongodb_data()
+        except Exception as e:
+            print(f"❌ MongoDB extraction failed, continuing with other sources: {e}")
+            mongodb_data = {}
+        
+        try:
+            api_data = self.extract_api_data()
+        except Exception as e:
+            print(f"❌ API extraction failed, continuing with other sources: {e}")
+            api_data = []
+        
+        try:
+            file_data = self.extract_flat_files()
+        except Exception as e:
+            print(f"❌ Flat file extraction failed, continuing with other sources: {e}")
+            file_data = {}
         
         # Combine all data
         extracted_data = {
@@ -151,14 +243,17 @@ class DataExtractor:
         }
         
         total_records = sum(len(data) for data in extracted_data.values())
-        print(f"📊 Total records extracted: {total_records}")
+        print(f"📊 Total records extracted: {total_records:,}")
         
         return extracted_data
     
     def close_connections(self):
         """Close MongoDB connections"""
-        if self.mongo_oltp1:
-            self.mongo_oltp1.client.close()
-        if self.mongo_oltp2:
-            self.mongo_oltp2.client.close()
-        print("🔌 MongoDB connections closed")
+        try:
+            if self.mongo_oltp1 is not None:
+                self.mongo_oltp1.client.close()
+            if self.mongo_oltp2 is not None:
+                self.mongo_oltp2.client.close()
+            print("🔌 MongoDB connections closed")
+        except Exception as e:
+            print(f"⚠️  Error closing MongoDB connections: {e}")
