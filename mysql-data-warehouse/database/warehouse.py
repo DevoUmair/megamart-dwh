@@ -17,10 +17,6 @@ class MySQLDataWarehouse:
         """Connect to MySQL database"""
         try:
             print(f"🔗 Attempting to connect to MySQL...")
-            print(f"   Host: {self.host}")
-            print(f"   User: {self.user}")
-            print(f"   Database: {self.database}")
-            
             self.connection = mysql.connector.connect(
                 host=self.host,
                 user=self.user,
@@ -30,7 +26,6 @@ class MySQLDataWarehouse:
             self.cursor = self.connection.cursor()
             print("✅ Connected to MySQL Server")
             
-            # Create database if not exists
             self.cursor.execute(f"CREATE DATABASE IF NOT EXISTS {self.database}")
             self.cursor.execute(f"USE {self.database}")
             print(f"✅ Using database: {self.database}")
@@ -39,17 +34,17 @@ class MySQLDataWarehouse:
             print(f"❌ MySQL Connection failed: {e}")
             raise
     
-    def create_star_schema(self):
-        """Create Star Schema tables in MySQL"""
-        print("🔄 Creating Star Schema Tables in MySQL...")
+    def create_enhanced_star_schema(self):
+        """Create Enhanced 9-Table Star Schema with One Fact Table"""
+        print("🔄 Creating Enhanced 9-Table Star Schema...")
         
-        # Drop tables if they exist (for clean setup)
+        # Drop tables if they exist
         drop_queries = [
-            "DROP TABLE IF EXISTS fact_sales",
-            "DROP TABLE IF EXISTS fact_inventory",
-            "DROP TABLE IF EXISTS fact_promotions",
-            "DROP TABLE IF EXISTS dim_competitor",
-            "DROP TABLE IF EXISTS dim_supplier", 
+            "DROP TABLE IF EXISTS fact_business_operations",
+            "DROP TABLE IF EXISTS dim_promotion_details",
+            "DROP TABLE IF EXISTS dim_inventory_movements",
+            "DROP TABLE IF EXISTS dim_competitor_pricing",
+            "DROP TABLE IF EXISTS dim_supplier",
             "DROP TABLE IF EXISTS dim_store",
             "DROP TABLE IF EXISTS dim_product",
             "DROP TABLE IF EXISTS dim_customer",
@@ -62,8 +57,9 @@ class MySQLDataWarehouse:
             except Error as e:
                 print(f"Note: {e}")
         
-        # Dimension Tables (exactly as in original working code)
+        # Enhanced Dimension Tables (8 dimensions + 1 fact)
         dimension_tables = [
+            # 1. Date Dimension (Same structure)
             """
             CREATE TABLE dim_date (
                 date_key INT AUTO_INCREMENT PRIMARY KEY,
@@ -80,6 +76,8 @@ class MySQLDataWarehouse:
                 UNIQUE KEY unique_date (full_date)
             )
             """,
+            
+            # 2. Customer Dimension (Same structure)
             """
             CREATE TABLE dim_customer (
                 customer_key INT AUTO_INCREMENT PRIMARY KEY,
@@ -96,6 +94,8 @@ class MySQLDataWarehouse:
                 UNIQUE KEY unique_customer (customer_id)
             )
             """,
+            
+            # 3. Product Dimension (Same structure)
             """
             CREATE TABLE dim_product (
                 product_key INT AUTO_INCREMENT PRIMARY KEY,
@@ -108,6 +108,8 @@ class MySQLDataWarehouse:
                 UNIQUE KEY unique_product (product_id)
             )
             """,
+            
+            # 4. Store Dimension (Same structure)
             """
             CREATE TABLE dim_store (
                 store_key INT AUTO_INCREMENT PRIMARY KEY,
@@ -124,6 +126,8 @@ class MySQLDataWarehouse:
                 UNIQUE KEY unique_store (store_id)
             )
             """,
+            
+            # 5. Supplier Dimension (Same structure)
             """
             CREATE TABLE dim_supplier (
                 supplier_key INT AUTO_INCREMENT PRIMARY KEY,
@@ -139,65 +143,43 @@ class MySQLDataWarehouse:
                 UNIQUE KEY unique_supplier (supplier_id)
             )
             """,
+            
+            # 6. Competitor Pricing Dimension (Enhanced from original)
             """
-            CREATE TABLE dim_competitor (
+            CREATE TABLE dim_competitor_pricing (
                 competitor_key INT AUTO_INCREMENT PRIMARY KEY,
                 competitor_id VARCHAR(20) NOT NULL,
                 competitor_name VARCHAR(50),
                 product_category VARCHAR(50),
                 scrape_date DATE,
                 overall_price_index DECIMAL(5,2),
+                base_price DECIMAL(8,2),
+                promo_price DECIMAL(8,2),
+                stock_availability VARCHAR(20),
+                location VARCHAR(50),
                 UNIQUE KEY unique_competitor (competitor_id, scrape_date, product_category)
             )
-            """
-        ]
-        
-        # Fact Tables (exactly as in original working code)
-        fact_tables = [
-            """
-            CREATE TABLE fact_sales (
-                sales_key INT AUTO_INCREMENT PRIMARY KEY,
-                date_key INT NOT NULL,
-                customer_key INT,
-                product_key INT NOT NULL,
-                store_key INT NOT NULL,
-                transaction_id VARCHAR(20) NOT NULL,
-                quantity INT NOT NULL,
-                unit_price DECIMAL(10,2) NOT NULL,
-                discount_amount DECIMAL(10,2) NOT NULL,
-                line_total DECIMAL(10,2) NOT NULL,
-                tax_amount DECIMAL(10,2) NOT NULL,
-                total_amount DECIMAL(10,2) NOT NULL,
-                payment_method VARCHAR(20),
-                category VARCHAR(50),
-                FOREIGN KEY (date_key) REFERENCES dim_date(date_key),
-                FOREIGN KEY (customer_key) REFERENCES dim_customer(customer_key),
-                FOREIGN KEY (product_key) REFERENCES dim_product(product_key),
-                FOREIGN KEY (store_key) REFERENCES dim_store(store_key)
-            )
             """,
+            
+            # 7. Inventory Movements Dimension (Enhanced from fact_inventory)
             """
-            CREATE TABLE fact_inventory (
-                inventory_key INT AUTO_INCREMENT PRIMARY KEY,
-                date_key INT NOT NULL,
-                product_key INT NOT NULL,
-                store_key INT NOT NULL,
-                supplier_key INT,
+            CREATE TABLE dim_inventory_movements (
+                movement_key INT AUTO_INCREMENT PRIMARY KEY,
                 movement_id VARCHAR(20) NOT NULL,
                 movement_type VARCHAR(20) NOT NULL,
-                quantity INT NOT NULL,
-                unit_cost DECIMAL(10,2) NOT NULL,
                 reason VARCHAR(50),
-                FOREIGN KEY (date_key) REFERENCES dim_date(date_key),
-                FOREIGN KEY (product_key) REFERENCES dim_product(product_key),
-                FOREIGN KEY (store_key) REFERENCES dim_store(store_key),
-                FOREIGN KEY (supplier_key) REFERENCES dim_supplier(supplier_key)
+                unit_cost DECIMAL(10,2) NOT NULL,
+                supplier_id VARCHAR(20),
+                approval_status VARCHAR(20),
+                movement_category VARCHAR(30),
+                UNIQUE KEY unique_movement (movement_id)
             )
             """,
+            
+            # 8. Promotion Details Dimension (Enhanced from fact_promotions)
             """
-            CREATE TABLE fact_promotions (
+            CREATE TABLE dim_promotion_details (
                 promotion_key INT AUTO_INCREMENT PRIMARY KEY,
-                date_key INT NOT NULL,
                 promo_id VARCHAR(20) NOT NULL,
                 promo_name VARCHAR(100),
                 product_category VARCHAR(50),
@@ -205,13 +187,80 @@ class MySQLDataWarehouse:
                 budget DECIMAL(10,2),
                 actual_spend DECIMAL(10,2),
                 status VARCHAR(20),
-                FOREIGN KEY (date_key) REFERENCES dim_date(date_key)
+                start_date DATE,
+                end_date DATE,
+                target_audience VARCHAR(30),
+                promo_type VARCHAR(20),
+                UNIQUE KEY unique_promotion (promo_id)
             )
             """
         ]
         
+        # Single Comprehensive Fact Table (Combining all original facts)
+        fact_table = """
+        CREATE TABLE fact_business_operations (
+            -- Primary Key
+            operation_key BIGINT AUTO_INCREMENT PRIMARY KEY,
+            
+            -- Dimension Foreign Keys (All 8 dimensions)
+            date_key INT NOT NULL,
+            customer_key INT,
+            product_key INT NOT NULL,
+            store_key INT NOT NULL,
+            supplier_key INT,
+            competitor_key INT,
+            movement_key INT,
+            promotion_key INT,
+            
+            -- Sales Metrics (from original fact_sales)
+            transaction_id VARCHAR(20),
+            quantity INT NOT NULL,
+            unit_price DECIMAL(10,2) NOT NULL,
+            discount_amount DECIMAL(10,2) NOT NULL,
+            line_total DECIMAL(10,2) NOT NULL,
+            tax_amount DECIMAL(10,2) NOT NULL,
+            total_amount DECIMAL(10,2) NOT NULL,
+            payment_method VARCHAR(20),
+            category VARCHAR(50),
+            
+            -- Inventory Metrics (from original fact_inventory)
+            movement_id VARCHAR(20),
+            movement_type VARCHAR(20),
+            unit_cost DECIMAL(10,2),
+            reason VARCHAR(50),
+            
+            -- Promotion Metrics (from original fact_promotions)
+            promo_id VARCHAR(20),
+            promo_name VARCHAR(100),
+            discount_pct DECIMAL(5,2),
+            budget DECIMAL(10,2),
+            actual_spend DECIMAL(10,2),
+            status VARCHAR(20),
+            
+            -- Competitor Metrics (from original dim_competitor)
+            competitor_id VARCHAR(20),
+            overall_price_index DECIMAL(5,2),
+            
+            -- Business Context
+            operation_type VARCHAR(30) NOT NULL,  -- 'SALE', 'INVENTORY_IN', 'INVENTORY_OUT', 'PROMOTION', 'COMPETITOR_ANALYSIS'
+            
+            -- Timestamps
+            created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            
+            -- Foreign Key Constraints
+            FOREIGN KEY (date_key) REFERENCES dim_date(date_key),
+            FOREIGN KEY (customer_key) REFERENCES dim_customer(customer_key),
+            FOREIGN KEY (product_key) REFERENCES dim_product(product_key),
+            FOREIGN KEY (store_key) REFERENCES dim_store(store_key),
+            FOREIGN KEY (supplier_key) REFERENCES dim_supplier(supplier_key),
+            FOREIGN KEY (competitor_key) REFERENCES dim_competitor_pricing(competitor_key),
+            FOREIGN KEY (movement_key) REFERENCES dim_inventory_movements(movement_key),
+            FOREIGN KEY (promotion_key) REFERENCES dim_promotion_details(promotion_key)
+        )
+        """
+        
         # Create all tables
-        for table_sql in dimension_tables + fact_tables:
+        for table_sql in dimension_tables + [fact_table]:
             try:
                 self.cursor.execute(table_sql)
                 table_name = table_sql.split('(')[0].split()[-1]
@@ -220,25 +269,22 @@ class MySQLDataWarehouse:
                 print(f"❌ Error creating table: {e}")
         
         self.connection.commit()
-        print("✅ Star Schema tables created successfully in MySQL")
+        print("✅ Enhanced 9-Table Star Schema created successfully")
     
-    def create_indexes(self):
-        """Create performance indexes for faster queries"""
-        print("🔄 Creating performance indexes...")
+    def create_enhanced_indexes(self):
+        """Create comprehensive performance indexes"""
+        print("🔄 Creating enhanced performance indexes...")
         
         indexes = [
-            "CREATE INDEX idx_fact_sales_date ON fact_sales(date_key)",
-            "CREATE INDEX idx_fact_sales_customer ON fact_sales(customer_key)",
-            "CREATE INDEX idx_fact_sales_product ON fact_sales(product_key)",
-            "CREATE INDEX idx_fact_sales_store ON fact_sales(store_key)",
-            "CREATE INDEX idx_fact_sales_transaction ON fact_sales(transaction_id)",
+            # Fact table indexes
+            "CREATE INDEX idx_fact_operations_date ON fact_business_operations(date_key)",
+            "CREATE INDEX idx_fact_operations_customer ON fact_business_operations(customer_key)",
+            "CREATE INDEX idx_fact_operations_product ON fact_business_operations(product_key)",
+            "CREATE INDEX idx_fact_operations_store ON fact_business_operations(store_key)",
+            "CREATE INDEX idx_fact_operations_type ON fact_business_operations(operation_type)",
+            "CREATE INDEX idx_fact_operations_transaction ON fact_business_operations(transaction_id)",
             
-            "CREATE INDEX idx_fact_inventory_date ON fact_inventory(date_key)",
-            "CREATE INDEX idx_fact_inventory_product ON fact_inventory(product_key)",
-            "CREATE INDEX idx_fact_inventory_store ON fact_inventory(store_key)",
-            
-            "CREATE INDEX idx_fact_promotions_date ON fact_promotions(date_key)",
-            
+            # Dimension indexes
             "CREATE INDEX idx_dim_customer_id ON dim_customer(customer_id)",
             "CREATE INDEX idx_dim_customer_tier ON dim_customer(loyalty_tier)",
             
@@ -251,8 +297,11 @@ class MySQLDataWarehouse:
             "CREATE INDEX idx_dim_supplier_id ON dim_supplier(supplier_id)",
             "CREATE INDEX idx_dim_supplier_category ON dim_supplier(category)",
             
-            "CREATE INDEX idx_dim_competitor_date ON dim_competitor(scrape_date)",
-            "CREATE INDEX idx_dim_competitor_category ON dim_competitor(product_category)"
+            "CREATE INDEX idx_dim_competitor_date ON dim_competitor_pricing(scrape_date)",
+            "CREATE INDEX idx_dim_competitor_category ON dim_competitor_pricing(product_category)",
+            
+            "CREATE INDEX idx_dim_movement_type ON dim_inventory_movements(movement_type)",
+            "CREATE INDEX idx_dim_promotion_status ON dim_promotion_details(status)"
         ]
         
         for index_sql in indexes:
@@ -262,7 +311,7 @@ class MySQLDataWarehouse:
                 print(f"Note: {e}")
         
         self.connection.commit()
-        print("✅ Performance indexes created")
+        print("✅ Enhanced performance indexes created")
     
     def populate_date_dimension(self, start_date='2020-01-01', end_date='2024-12-31'):
         """Populate date dimension table"""
@@ -289,7 +338,7 @@ class MySQLDataWarehouse:
                     current_date.strftime('%A'),
                     current_date.strftime('%B'),
                     current_date.weekday() >= 5,
-                    False  # Simplified holiday logic
+                    False
                 ))
                 records_inserted += 1
             except Error as e:
@@ -300,14 +349,14 @@ class MySQLDataWarehouse:
         self.connection.commit()
         print(f"✅ Populated {records_inserted} dates in dimension table")
     
-    def verify_schema(self):
-        """Verify the star schema creation"""
-        print("\n🔍 Verifying Star Schema...")
+    def verify_enhanced_schema(self):
+        """Verify the enhanced star schema creation"""
+        print("\n🔍 Verifying Enhanced Star Schema...")
         
-        # Get table counts
         tables = [
             'dim_date', 'dim_customer', 'dim_product', 'dim_store', 
-            'dim_supplier', 'dim_competitor', 'fact_sales', 'fact_inventory', 'fact_promotions'
+            'dim_supplier', 'dim_competitor_pricing', 'dim_inventory_movements', 
+            'dim_promotion_details', 'fact_business_operations'
         ]
         
         for table in tables:
@@ -318,11 +367,11 @@ class MySQLDataWarehouse:
             except Error as e:
                 print(f"   {table}: Error - {e}")
     
-    def generate_erd_script(self):
+    def generate_comprehensive_erd_script(self):
         """Generate SQL script for MySQL Workbench ERD"""
         erd_script = """
--- MegaMart Data Warehouse - Star Schema SQL Script
--- Generated for MySQL Workbench ERD
+-- MegaMart Data Warehouse - Enhanced 9-Table Star Schema
+-- Single Fact Table with Multiple Dimensions
 
 -- Dimension Tables
 
@@ -396,25 +445,61 @@ CREATE TABLE dim_supplier (
     UNIQUE KEY unique_supplier (supplier_id)
 );
 
-CREATE TABLE dim_competitor (
+CREATE TABLE dim_competitor_pricing (
     competitor_key INT AUTO_INCREMENT PRIMARY KEY,
     competitor_id VARCHAR(20) NOT NULL,
     competitor_name VARCHAR(50),
     product_category VARCHAR(50),
     scrape_date DATE,
     overall_price_index DECIMAL(5,2),
+    base_price DECIMAL(8,2),
+    promo_price DECIMAL(8,2),
+    stock_availability VARCHAR(20),
+    location VARCHAR(50),
     UNIQUE KEY unique_competitor (competitor_id, scrape_date, product_category)
 );
 
--- Fact Tables
+CREATE TABLE dim_inventory_movements (
+    movement_key INT AUTO_INCREMENT PRIMARY KEY,
+    movement_id VARCHAR(20) NOT NULL,
+    movement_type VARCHAR(20) NOT NULL,
+    reason VARCHAR(50),
+    unit_cost DECIMAL(10,2) NOT NULL,
+    supplier_id VARCHAR(20),
+    approval_status VARCHAR(20),
+    movement_category VARCHAR(30),
+    UNIQUE KEY unique_movement (movement_id)
+);
 
-CREATE TABLE fact_sales (
-    sales_key INT AUTO_INCREMENT PRIMARY KEY,
+CREATE TABLE dim_promotion_details (
+    promotion_key INT AUTO_INCREMENT PRIMARY KEY,
+    promo_id VARCHAR(20) NOT NULL,
+    promo_name VARCHAR(100),
+    product_category VARCHAR(50),
+    discount_pct DECIMAL(5,2),
+    budget DECIMAL(10,2),
+    actual_spend DECIMAL(10,2),
+    status VARCHAR(20),
+    start_date DATE,
+    end_date DATE,
+    target_audience VARCHAR(30),
+    promo_type VARCHAR(20),
+    UNIQUE KEY unique_promotion (promo_id)
+);
+
+-- Single Comprehensive Fact Table
+
+CREATE TABLE fact_business_operations (
+    operation_key BIGINT AUTO_INCREMENT PRIMARY KEY,
     date_key INT NOT NULL,
     customer_key INT,
     product_key INT NOT NULL,
     store_key INT NOT NULL,
-    transaction_id VARCHAR(20) NOT NULL,
+    supplier_key INT,
+    competitor_key INT,
+    movement_key INT,
+    promotion_key INT,
+    transaction_id VARCHAR(20),
     quantity INT NOT NULL,
     unit_price DECIMAL(10,2) NOT NULL,
     discount_amount DECIMAL(10,2) NOT NULL,
@@ -423,65 +508,48 @@ CREATE TABLE fact_sales (
     total_amount DECIMAL(10,2) NOT NULL,
     payment_method VARCHAR(20),
     category VARCHAR(50),
-    FOREIGN KEY (date_key) REFERENCES dim_date(date_key),
-    FOREIGN KEY (customer_key) REFERENCES dim_customer(customer_key),
-    FOREIGN KEY (product_key) REFERENCES dim_product(product_key),
-    FOREIGN KEY (store_key) REFERENCES dim_store(store_key)
-);
-
-CREATE TABLE fact_inventory (
-    inventory_key INT AUTO_INCREMENT PRIMARY KEY,
-    date_key INT NOT NULL,
-    product_key INT NOT NULL,
-    store_key INT NOT NULL,
-    supplier_key INT,
-    movement_id VARCHAR(20) NOT NULL,
-    movement_type VARCHAR(20) NOT NULL,
-    quantity INT NOT NULL,
-    unit_cost DECIMAL(10,2) NOT NULL,
+    movement_id VARCHAR(20),
+    movement_type VARCHAR(20),
+    unit_cost DECIMAL(10,2),
     reason VARCHAR(50),
-    FOREIGN KEY (date_key) REFERENCES dim_date(date_key),
-    FOREIGN KEY (product_key) REFERENCES dim_product(product_key),
-    FOREIGN KEY (store_key) REFERENCES dim_store(store_key),
-    FOREIGN KEY (supplier_key) REFERENCES dim_supplier(supplier_key)
-);
-
-CREATE TABLE fact_promotions (
-    promotion_key INT AUTO_INCREMENT PRIMARY KEY,
-    date_key INT NOT NULL,
-    promo_id VARCHAR(20) NOT NULL,
+    promo_id VARCHAR(20),
     promo_name VARCHAR(100),
-    product_category VARCHAR(50),
     discount_pct DECIMAL(5,2),
     budget DECIMAL(10,2),
     actual_spend DECIMAL(10,2),
     status VARCHAR(20),
-    FOREIGN KEY (date_key) REFERENCES dim_date(date_key)
+    competitor_id VARCHAR(20),
+    overall_price_index DECIMAL(5,2),
+    operation_type VARCHAR(30) NOT NULL,
+    created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (date_key) REFERENCES dim_date(date_key),
+    FOREIGN KEY (customer_key) REFERENCES dim_customer(customer_key),
+    FOREIGN KEY (product_key) REFERENCES dim_product(product_key),
+    FOREIGN KEY (store_key) REFERENCES dim_store(store_key),
+    FOREIGN KEY (supplier_key) REFERENCES dim_supplier(supplier_key),
+    FOREIGN KEY (competitor_key) REFERENCES dim_competitor_pricing(competitor_key),
+    FOREIGN KEY (movement_key) REFERENCES dim_inventory_movements(movement_key),
+    FOREIGN KEY (promotion_key) REFERENCES dim_promotion_details(promotion_key)
 );
 
 -- Performance Indexes
 
-CREATE INDEX idx_fact_sales_date ON fact_sales(date_key);
-CREATE INDEX idx_fact_sales_customer ON fact_sales(customer_key);
-CREATE INDEX idx_fact_sales_product ON fact_sales(product_key);
-CREATE INDEX idx_fact_sales_store ON fact_sales(store_key);
-
-CREATE INDEX idx_fact_inventory_date ON fact_inventory(date_key);
-CREATE INDEX idx_fact_inventory_product ON fact_inventory(product_key);
-CREATE INDEX idx_fact_inventory_store ON fact_inventory(store_key);
+CREATE INDEX idx_fact_operations_date ON fact_business_operations(date_key);
+CREATE INDEX idx_fact_operations_customer ON fact_business_operations(customer_key);
+CREATE INDEX idx_fact_operations_product ON fact_business_operations(product_key);
+CREATE INDEX idx_fact_operations_store ON fact_business_operations(store_key);
+CREATE INDEX idx_fact_operations_type ON fact_business_operations(operation_type);
 
 CREATE INDEX idx_dim_customer_id ON dim_customer(customer_id);
 CREATE INDEX idx_dim_product_id ON dim_product(product_id);
 CREATE INDEX idx_dim_store_id ON dim_store(store_id);
+CREATE INDEX idx_dim_supplier_id ON dim_supplier(supplier_id);
 """
         
-        # Create output directory if it doesn't exist
         os.makedirs('output', exist_ok=True)
-        
-        # Save to file
-        with open('output/megamart_star_schema.sql', 'w') as f:
+        with open('output/megamart_enhanced_schema.sql', 'w') as f:
             f.write(erd_script)
-        print("✅ ERD SQL script saved as 'output/megamart_star_schema.sql'")
+        print("✅ Enhanced ERD SQL script saved as 'output/megamart_enhanced_schema.sql'")
     
     def close(self):
         """Close database connection"""

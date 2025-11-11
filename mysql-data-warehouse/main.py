@@ -1,8 +1,8 @@
 from database.warehouse import MySQLDataWarehouse
 
 def main():
-    print("🚀 MegaMart Data Warehouse Setup - MySQL")
-    print("=" * 50)
+    print("🚀 MegaMart Enhanced Data Warehouse Setup - 9-Table Schema")
+    print("=" * 65)
     
     # Database configuration
     db_config = {
@@ -25,22 +25,23 @@ def main():
         # Connect to MySQL
         dw.connect()
         
-        # Create star schema
-        dw.create_star_schema()
+        # Create enhanced 9-table schema
+        dw.create_enhanced_star_schema()
         
         # Create indexes
-        dw.create_indexes()
+        dw.create_enhanced_indexes()
         
         # Populate date dimension
         dw.populate_date_dimension()
         
         # Verify schema
-        dw.verify_schema()
+        dw.verify_enhanced_schema()
         
-        # Generate ERD script
-        dw.generate_erd_script()
+        # Generate comprehensive ERD script
+        dw.generate_comprehensive_erd_script()
         
-        print("\n🎉 MySQL Data Warehouse Setup Completed!")
+        print("\n🎉 Enhanced 9-Table Data Warehouse Setup Completed!")
+        print("📊 Single Fact Table with 8 Dimensions Ready for Analytics!")
         
     except Exception as e:
         print(f"❌ Setup failed: {e}")
