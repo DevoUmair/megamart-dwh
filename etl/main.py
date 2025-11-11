@@ -4,10 +4,12 @@ from transformer import DataTransformer
 from loader import DataLoader
 
 def main():
-    print("🚀 MEGAMART ETL PIPELINE")
+    print("🚀 MEGAMART ETL PIPELINE - MONGODB TO SINGLE FACT TABLE")
     print("=" * 60)
     
     start_time = time.time()
+    extractor = None
+    loader = None
     
     try:
         # Initialize ETL components
@@ -18,13 +20,13 @@ def main():
         # ETL Process
         print("\nStarting ETL Process...")
         
-        # Extract
+        # Extract phase from MongoDB
         extracted_data = extractor.extract_all()
         
-        # Transform
+        # Transform phase  
         transformed_data = transformer.transform_all(extracted_data)
         
-        # Load
+        # Load phase to MySQL Data Warehouse
         loader.load_all(transformed_data)
         
         # Summary
@@ -34,20 +36,28 @@ def main():
         print("="*60)
         print(f"⏱️  Total Time: {elapsed_time:.2f} seconds")
         print(f"📊 Records Processed:")
-        print(f"   Customers: {len(transformed_data['customers'])}")
-        print(f"   Products: {len(transformed_data['products'])}")
-        print(f"   Stores: {len(transformed_data['stores'])}")
-        print(f"   Sales: {len(transformed_data['sales'])}")
-        print(f"   Inventory: {len(transformed_data['inventory'])}")
+        print(f"   Customers: {len(transformed_data.get('dim_customer', []))}")
+        print(f"   Products: {len(transformed_data.get('dim_product', []))}")
+        print(f"   Stores: {len(transformed_data.get('dim_store', []))}")
+        print(f"   Employees: {len(transformed_data.get('dim_employee', []))}")
+        print(f"   Promotions: {len(transformed_data.get('dim_promotion', []))}")
+        print(f"   Suppliers: {len(transformed_data.get('dim_supplier', []))}")
+        print(f"   Fact Sales: {len(transformed_data.get('fact_sales', []))}")
         
     except Exception as e:
         print(f"\n❌ ETL Pipeline Failed: {e}")
+        import traceback
+        traceback.print_exc()
     
     finally:
+        # Clean up resources
         try:
-            loader.close()
-        except:
-            pass
+            if extractor:
+                extractor.close_connections()
+            if loader:
+                loader.close()
+        except Exception as e:
+            print(f"⚠️  Cleanup warning: {e}")
 
 if __name__ == "__main__":
     main()

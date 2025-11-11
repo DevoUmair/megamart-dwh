@@ -1,48 +1,80 @@
 import mysql.connector
 from mysql.connector import Error
-from config.settings import MYSQL_CONFIG
+from config.settings import MYSQL_WAREHOUSE_CONFIG
 
 class DataLoader:
     def __init__(self):
-        self.conn = mysql.connector.connect(**MYSQL_CONFIG)
-        self.cursor = self.conn.cursor()
+        try:
+            self.conn = mysql.connector.connect(**MYSQL_WAREHOUSE_CONFIG)
+            self.cursor = self.conn.cursor()
+            print("✅ Connected to data warehouse")
+        except Error as e:
+            print(f"❌ Data warehouse connection failed: {e}")
+            raise
     
     def load_all(self, transformed_data):
-        """Load all transformed data"""
+        """Load all transformed data into single fact table schema"""
         print("\n" + "="*50)
         print("📤 LOADING PHASE")
         print("="*50)
         
-        # Load dimensions
-        self.load_dimension('dim_customer', transformed_data['customers'])
-        self.load_dimension('dim_product', transformed_data['products'])
-        self.load_dimension('dim_store', transformed_data['stores'])
-        self.load_dimension('dim_supplier', transformed_data['suppliers'])
-        self.load_dimension('dim_competitor', transformed_data['competitors'])
-        
-        # Load facts
-        self.load_fact_sales(transformed_data['sales'])
-        self.load_fact_inventory(transformed_data['inventory'])
-        self.load_fact_promotions(transformed_data['promotions'])
-        
-        print("✅ Data loading completed")
+        try:
+            # Disable foreign key checks for faster loading
+            self.cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
+            
+            # Load dimensions first
+            self.load_dimensions(transformed_data)
+            
+            # Load single fact table
+            self.load_fact_sales(transformed_data['fact_sales'])
+            
+            # Re-enable foreign key checks
+            self.cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
+            
+            print("✅ Data loading completed successfully")
+            
+        except Error as e:
+            print(f"❌ Loading failed: {e}")
+            self.conn.rollback()
+            raise
     
-    def load_dimension(self, table_name, data):
-        """Load dimension table"""
+    def load_dimensions(self, transformed_data):
+        """Load all dimension tables"""
+        print("📊 Loading dimension tables...")
+        
+        dimension_tables = [
+            ('dim_customer', transformed_data.get('dim_customer', [])),
+            ('dim_product', transformed_data.get('dim_product', [])),
+            ('dim_store', transformed_data.get('dim_store', [])),
+            ('dim_employee', transformed_data.get('dim_employee', [])),
+            ('dim_promotion', transformed_data.get('dim_promotion', [])),
+            ('dim_supplier', transformed_data.get('dim_supplier', []))
+        ]
+        
+        for table_name, data in dimension_tables:
+            if data:
+                self.load_dimension_table(table_name, data)
+            else:
+                print(f"⚠️  No data for {table_name}")
+    
+    def load_dimension_table(self, table_name, data):
+        """Load a single dimension table"""
         if not data:
-            print(f"⚠️  No data for {table_name}")
             return
         
+        # Get the ID column name
         id_column = table_name.replace('dim_', '') + '_id'
-        columns = ', '.join(data[0].keys())
-        placeholders = ', '.join(['%s'] * len(data[0].keys()))
+        columns = list(data[0].keys())
         
-        # Build update clause
-        update_cols = [f"{col} = VALUES({col})" for col in data[0].keys() if col != id_column]
+        # Create placeholders and update clause
+        placeholders = ', '.join(['%s'] * len(columns))
+        update_cols = [f"{col} = VALUES({col})" for col in columns if col != id_column]
         update_clause = ', '.join(update_cols)
         
+        # Build the INSERT ... ON DUPLICATE KEY UPDATE query
+        columns_str = ', '.join(columns)
         sql = f"""
-            INSERT INTO {table_name} ({columns})
+            INSERT INTO {table_name} ({columns_str})
             VALUES ({placeholders})
             ON DUPLICATE KEY UPDATE {update_clause}
         """
@@ -56,115 +88,108 @@ class DataLoader:
         except Error as e:
             print(f"❌ Error loading {table_name}: {e}")
             self.conn.rollback()
+            raise
     
-    def load_fact_sales(self, sales_data):
-        """Load sales fact table"""
-        if not sales_data:
-            print("⚠️  No sales data")
+    def load_fact_sales(self, fact_data):
+        """Load the single fact_sales table"""
+        if not fact_data:
+            print("⚠️  No fact sales data to load")
             return
         
-        count = 0
-        for sale in sales_data:
+        print("📈 Loading fact_sales table...")
+        
+        # Define the columns for fact_sales
+        columns = [
+            'date_key', 'time_key', 'customer_id', 'product_id', 'store_id', 
+            'employee_id', 'promotion_id', 'supplier_id', 'transaction_id', 
+            'line_item_id', 'quantity', 'unit_price', 'discount_amount', 
+            'line_total', 'tax_amount', 'total_amount', 'profit', 
+            'stock_level', 'restock_quantity', 'waste_quantity', 
+            'competitor_price', 'price_difference', 'price_competitiveness_score',
+            'payment_method', 'category', 'movement_type', 'shift_type', 'department'
+        ]
+        
+        placeholders = ', '.join(['%s'] * len(columns))
+        columns_str = ', '.join(columns)
+        
+        sql = f"INSERT INTO fact_sales ({columns_str}) VALUES ({placeholders})"
+        
+        # Transform data to match column order and resolve foreign keys
+        processed_count = 0
+        batch_size = 1000
+        batch = []
+        
+        for fact in fact_data:
             try:
-                date_key = self.get_key('dim_date', 'full_date', sale['sale_date'])
-                customer_key = self.get_key('dim_customer', 'customer_id', sale.get('customer_id'))
-                product_key = self.get_key('dim_product', 'product_id', sale['product_id'])
-                store_key = self.get_key('dim_store', 'store_id', sale['store_id'])
+                # Resolve foreign keys
+                customer_key = self.get_foreign_key('dim_customer', 'customer_id', fact.get('customer_id'))
+                product_key = self.get_foreign_key('dim_product', 'product_id', fact.get('product_id'))
+                store_key = self.get_foreign_key('dim_store', 'store_id', fact.get('store_id'))
+                employee_key = self.get_foreign_key('dim_employee', 'employee_id', fact.get('employee_id'))
+                promotion_key = self.get_foreign_key('dim_promotion', 'promotion_id', fact.get('promotion_id'))
+                supplier_key = self.get_foreign_key('dim_supplier', 'supplier_id', fact.get('supplier_id'))
                 
-                if all([date_key, product_key, store_key]):
-                    sql = """
-                        INSERT INTO fact_sales 
-                        (date_key, customer_key, product_key, store_key, transaction_id, 
-                         quantity, unit_price, discount_amount, line_total, tax_amount, 
-                         total_amount, payment_method, category)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """
-                    
-                    self.cursor.execute(sql, (
-                        date_key, customer_key, product_key, store_key, sale['transaction_id'],
-                        sale['quantity'], sale['unit_price'], sale['discount_amount'], sale['line_total'],
-                        sale['tax_amount'], sale['total_amount'], sale.get('payment_method'), sale.get('category')
-                    ))
-                    count += 1
+                # Prepare values in correct order
+                values = (
+                    fact.get('date_key'),
+                    fact.get('time_key'),
+                    customer_key,
+                    product_key,
+                    store_key,
+                    employee_key,
+                    promotion_key,
+                    supplier_key,
+                    fact.get('transaction_id'),
+                    fact.get('line_item_id'),
+                    fact.get('quantity'),
+                    fact.get('unit_price'),
+                    fact.get('discount_amount'),
+                    fact.get('line_total'),
+                    fact.get('tax_amount'),
+                    fact.get('total_amount'),
+                    fact.get('profit'),
+                    fact.get('stock_level'),
+                    fact.get('restock_quantity'),
+                    fact.get('waste_quantity'),
+                    fact.get('competitor_price'),
+                    fact.get('price_difference'),
+                    fact.get('price_competitiveness_score'),
+                    fact.get('payment_method'),
+                    fact.get('category'),
+                    fact.get('movement_type'),
+                    fact.get('shift_type'),
+                    fact.get('department')
+                )
+                
+                batch.append(values)
+                processed_count += 1
+                
+                # Insert in batches for performance
+                if len(batch) >= batch_size:
+                    self.cursor.executemany(sql, batch)
+                    self.conn.commit()
+                    batch = []
+                    print(f"   ↳ Processed {processed_count} records...")
                     
             except Error as e:
+                print(f"   ↳ Skipping record due to error: {e}")
                 continue
         
-        self.conn.commit()
-        print(f"✅ fact_sales: {count} records")
+        # Insert remaining records
+        if batch:
+            self.cursor.executemany(sql, batch)
+            self.conn.commit()
+        
+        print(f"✅ fact_sales: {processed_count} records loaded")
     
-    def load_fact_inventory(self, inventory_data):
-        """Load inventory fact table"""
-        if not inventory_data:
-            print("⚠️  No inventory data")
-            return
-        
-        count = 0
-        for movement in inventory_data:
-            try:
-                date_key = self.get_key('dim_date', 'full_date', movement['movement_date'])
-                product_key = self.get_key('dim_product', 'product_id', movement['product_id'])
-                store_key = self.get_key('dim_store', 'store_id', movement['store_id'])
-                supplier_key = self.get_key('dim_supplier', 'supplier_id', movement.get('supplier_id'))
-                
-                if all([date_key, product_key, store_key]):
-                    sql = """
-                        INSERT INTO fact_inventory 
-                        (date_key, product_key, store_key, supplier_key, movement_id, 
-                         movement_type, quantity, unit_cost, reason)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """
-                    
-                    self.cursor.execute(sql, (
-                        date_key, product_key, store_key, supplier_key, movement['movement_id'],
-                        movement['movement_type'], movement['quantity'], movement['unit_cost'], movement.get('reason')
-                    ))
-                    count += 1
-                    
-            except Error as e:
-                continue
-        
-        self.conn.commit()
-        print(f"✅ fact_inventory: {count} records")
-    
-    def load_fact_promotions(self, promotions_data):
-        """Load promotions fact table"""
-        if not promotions_data:
-            print("⚠️  No promotion data")
-            return
-        
-        count = 0
-        for promo in promotions_data:
-            try:
-                date_key = self.get_key('dim_date', 'full_date', promo['start_date'])
-                
-                if date_key:
-                    sql = """
-                        INSERT INTO fact_promotions 
-                        (date_key, promo_id, promo_name, product_category, discount_pct, 
-                         budget, actual_spend, status)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    """
-                    
-                    self.cursor.execute(sql, (
-                        date_key, promo['promo_id'], promo['promo_name'], promo['product_category'],
-                        promo['discount_pct'], promo['budget'], promo['actual_spend'], promo['status']
-                    ))
-                    count += 1
-                    
-            except Error as e:
-                continue
-        
-        self.conn.commit()
-        print(f"✅ fact_promotions: {count} records")
-    
-    def get_key(self, table, id_column, value):
-        """Get foreign key from dimension table"""
+    def get_foreign_key(self, table_name, id_column, value):
+        """Get foreign key value from dimension table"""
         if not value:
             return None
         
         try:
-            self.cursor.execute(f"SELECT {table.replace('dim_', '')}_key FROM {table} WHERE {id_column} = %s", (value,))
+            key_column = table_name.replace('dim_', '') + '_key'
+            self.cursor.execute(f"SELECT {key_column} FROM {table_name} WHERE {id_column} = %s", (value,))
             result = self.cursor.fetchone()
             return result[0] if result else None
         except Error:
@@ -172,6 +197,8 @@ class DataLoader:
     
     def close(self):
         """Close database connection"""
-        self.cursor.close()
-        self.conn.close()
-        print("🔌 Database connection closed")
+        if self.cursor:
+            self.cursor.close()
+        if self.conn and self.conn.is_connected():
+            self.conn.close()
+        print("🔌 Data warehouse connection closed")

@@ -34,6 +34,9 @@ def main():
         # Populate date dimension
         dw.populate_date_dimension()
         
+        # Populate time dimension
+        dw.populate_time_dimension()
+        
         # Verify schema
         dw.verify_schema()
         

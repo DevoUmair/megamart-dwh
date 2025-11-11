@@ -1,12 +1,3 @@
-# Database Configuration
-MYSQL_CONFIG = {
-    'host': 'localhost',
-    'user': 'root',
-    'password': 'UMRlfr1$',
-    'database': 'megamart_warehouse',
-    'port': 3306
-}
-
 # MongoDB Configuration
 MONGODB_CONFIG = {
     'username': 'umair',
@@ -16,6 +7,15 @@ MONGODB_CONFIG = {
         'oltp1': 'megamart_sales_oltp1',
         'oltp2': 'megamart_customer_oltp2'
     }
+}
+
+# MySQL Data Warehouse Configuration
+MYSQL_WAREHOUSE_CONFIG = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': 'UMRlfr1$',
+    'database': 'megamart_warehouse',
+    'port': 3306
 }
 
 # API Configuration
@@ -28,6 +28,7 @@ API_CONFIG = {
 
 # File Paths
 FILE_PATHS = {
-    'promotions': 'etl/flat_files/promotions.csv',
-    'employee_schedules': 'etl/flat_files/employee_schedules.csv'
+    'flat_files_folder': 'flat_files',
+    'promotions': 'flat_files/promotions.csv',
+    'employee_schedules': 'flat_files/employee_schedules.csv'
 }
